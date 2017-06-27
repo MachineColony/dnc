@@ -3,6 +3,8 @@ import tensorflow as tf
 
 import random
 import string
+import os
+import json
 
 from dnc import DNC
 
@@ -100,8 +102,8 @@ class Model(object):
         if len(X) != len(Y):
             raise ValueError('x, y must have same length')
 
-        i = 0
-        for n in range(epoch):
+        for e in range(epoch):
+            n = 0
             for batch in self._partition_by_batch_size(zip(X, Y)):
                 feed_dict = {}
                 for i in range(self._input_seq_length):
@@ -114,11 +116,11 @@ class Model(object):
                     for i in range(self._output_seq_length):
                         feed_dict[self._labels[i]].append(char_to_vec(y[i]))
                 c, _ = self._session.run([self._cost, self._step], feed_dict=feed_dict)
-                i += 1
-                if i % 100 == 0:
-                    print 'epoch: {}, Cost: {}'.format(n, c)
+                n += 1
+                print 'epoch: {}, {}%, Cost: {}'.format(e, float(self._batch_size * n) * 100 / len(X), c)
 
     def predict(self, X):
+        r = []
         for batch in self._partition_by_batch_size(X):
             if len(batch) < self._batch_size:
                 batch = batch + [' ' * self._input_seq_length] * (self._batch_size - len(batch))
@@ -126,11 +128,34 @@ class Model(object):
             for i in range(self._input_seq_length):
                 feed_dict[self._encoder_inputs[i]] = []
             for x in batch:
-                print x
                 for i in range(self._input_seq_length):
                     feed_dict[self._encoder_inputs[i]].append(char_to_vec(x[i]))
             output, = self._session.run([self._squashed_output], feed_dict=feed_dict)
-            print output_to_string(output)
+            r += output_to_string(output)
+        return r[:len(X)]
+
+    def save(self, path):
+        if not os.path.exists(path):
+            os.makedirs(path)
+
+        with open(os.path.join(path, 'params.json'), 'w') as f:
+            json.dump({
+                'batch_size': self._batch_size,
+                'input_seq_length': self._input_seq_length,
+                'output_seq_length': self._output_seq_length,
+            }, f)
+
+        tf.train.Saver(tf.trainable_variables()).save(self._session, os.path.join(path, 'model.ckpt'))
+
+    @staticmethod
+    def restore(path):
+        m = None
+        with open(os.path.join(path, 'params.json')) as f:
+            params = json.load(f)
+        if params:
+            m = Model(params['batch_size'], params['input_seq_length'], params['output_seq_length'])
+            tf.train.Saver(tf.trainable_variables()).restore(m._session, os.path.join(path, 'model.ckpt'))
+        return m
 
 
 if __name__ == '__main__':
@@ -146,8 +171,12 @@ if __name__ == '__main__':
     model.fit(X, Y, 10)
 
     X = []
-    for n in range(10):
+    for n in range(20):
         x = random_string(10)
         X.append(x)
 
-    model.predict(X)
+    print X
+    print model.predict(X)
+
+    # model.save('./m')
+    # model = Model.restore('./m')
